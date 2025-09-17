@@ -38,13 +38,14 @@ type AttendanceResponse struct {
 	ID           uint    `json:"id"`
 	EmployeeID   string  `json:"employee_id"`
 	AttendanceID string  `json:"attendance_id"`
-	ClockIn      string  `json:"clock_in"`  // Format: "2006-01-02 15:04"
-	ClockOut     *string `json:"clock_out"` // Pointer agar bisa null
 	CreatedAt    string  `json:"created_at"`
-	IsOnTime     bool    `json:"is_on_time"`
-	IsLate       bool    `json:"is_late"`
-	IsEarly      bool    `json:"is_early"`
+	ClockIn      string  `json:"clock_in"`  
+	ClockOut     *string `json:"clock_out"` 
 	Message      string  `json:"message"`
+	EmployeeName string  `json:"name"` 
+	Department   string  `json:"department"`
+	IsLate       bool    `json:"is_late"`
+	
 }
 
 type AttendanceHistoryResponse struct {

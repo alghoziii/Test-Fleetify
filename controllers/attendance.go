@@ -28,7 +28,7 @@ func (h *AttendanceController) ClockIn(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, dto.BuildResponse(true, "Clock in successful", response))
+	c.JSON(http.StatusCreated, dto.BuildResponse(true, "Berhasil absen masuk", response))
 }
 
 func (h *AttendanceController) ClockOut(c *gin.Context) {
@@ -44,7 +44,7 @@ func (h *AttendanceController) ClockOut(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(true, "Clock out successful", response))
+	c.JSON(http.StatusOK, dto.BuildResponse(true, "Berhasil Absen Keluar", response))
 }
 
 func (h *AttendanceController) GetAttendanceLogs(c *gin.Context) {

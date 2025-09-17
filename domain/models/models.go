@@ -28,7 +28,7 @@ type Attendance struct {
 	ClockOut     *time.Time `json:"clock_out"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
-	Employee     Employee   `gorm:"foreignKey:EmployeeID;references:EmployeeID" json:"employee,omitempty"`
+	Employee     Employee   `gorm:"foreignKey:EmployeeID;references:EmployeeID" json:"employee"`
 }
 
 type AttendanceHistory struct {

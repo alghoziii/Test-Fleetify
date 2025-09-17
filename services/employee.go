@@ -4,8 +4,6 @@ import (
 	"Test_Fleetify/domain/dto"
 	"Test_Fleetify/domain/models"
 	"Test_Fleetify/repositories"
-	"Test_Fleetify/utils"
-	"fmt"
 	"gorm.io/gorm"
 )
 
@@ -27,22 +25,8 @@ func NewEmployeeService(employeeRepo repositories.EmployeeRepository, db *gorm.D
 }
 
 func (s *employeeService) CreateEmployee(request dto.EmployeeRequest) (dto.EmployeeResponse, error) {
-	existingEmployee, err := s.employeeRepo.FindByNameAndDepartment(request.Name, request.DepartmentID)
-	if err == nil && existingEmployee.ID != 0 {
-		return dto.EmployeeResponse{}, fmt.Errorf("employee with name '%s' already exists in this department", request.Name)
-	}
-	// Auto-generate employee_id jika kosong
-	employeeID := request.EmployeeID
-	if employeeID == "" {
-		generatedID, err := utils.GenerateEmployeeID(s.db, "EMP", 4)
-		if err != nil {
-			return dto.EmployeeResponse{}, fmt.Errorf("failed to generate employee ID: %v", err)
-		}
-		employeeID = generatedID
-	}
-
 	employee := models.Employee{
-		EmployeeID:   employeeID,
+		EmployeeID:   request.EmployeeID,
 		DepartmentID: request.DepartmentID,
 		Name:         request.Name,
 		Address:      request.Address,

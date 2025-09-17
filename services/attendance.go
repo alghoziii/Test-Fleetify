@@ -34,99 +34,124 @@ func NewAttendanceService(
 }
 
 func (s *attendanceService) ClockIn(request dto.ClockInRequest) (dto.AttendanceResponse, error) {
-	// Check if employee exists
-	employee, err := s.employeeRepo.FindByEmployeeID(request.EmployeeID)
-	if err != nil {
-		return dto.AttendanceResponse{}, fmt.Errorf("employee not found")
-	}
+    // Check if employee exists
+    employee, err := s.employeeRepo.FindByEmployeeID(request.EmployeeID)
+    if err != nil {
+        return dto.AttendanceResponse{}, fmt.Errorf("Karyawan tidak ditemukan")
+    }
 
-	// Check if already clocked in today
-	now := time.Now()
-	existingAttendance, err := s.attendanceRepo.FindByEmployeeIDAndDate(request.EmployeeID, now)
-	if err == nil && existingAttendance.ID != 0 {
-		return dto.AttendanceResponse{}, fmt.Errorf("already clocked in today")
-	}
+    now := time.Now()
+    existingAttendance, err := s.attendanceRepo.FindByEmployeeIDAndDate(request.EmployeeID, now)
+    if err == nil && existingAttendance.ID != 0 {
+        return dto.AttendanceResponse{}, fmt.Errorf("Sudah Absen hari ini")
+    }
 
-	attendanceID, err := utils.GenerateAttendanceClockID(s.db)
-	if err != nil {
-		return dto.AttendanceResponse{}, fmt.Errorf("failed to generate attendance ID: %v", err)
-	}
+    attendanceID, err := utils.GenerateAttendanceClockID(s.db)
+    if err != nil {
+        return dto.AttendanceResponse{}, fmt.Errorf("failed to generate attendance ID: %v", err)
+    }
 
-	attendance := models.Attendance{
-		EmployeeID:   request.EmployeeID,
-		AttendanceID: attendanceID,
-		ClockIn:      now,
-		ClockOut:     nil,
-	}
+    // DEBUG: Log waktu untuk troubleshooting
+    fmt.Printf("Waktu sekarang: %v\n", now)
+    fmt.Printf("Max clock in time dari DB: %v\n", employee.Department.MaxClockInTime)
 
-	createdAttendance, err := s.attendanceRepo.CreateAttendance(attendance)
-	if err != nil {
-		return dto.AttendanceResponse{}, err
-	}
+    // Parse max clock in time dari department
+    maxClockInTimeStr := employee.Department.MaxClockInTime
+    var maxClockInTime time.Time
 
-	isOnTime := true
-	isLate := false
-	message := "Clock In (On Time)"
+    // Coba parse dengan format HH:MM dulu (yang paling umum)
+    maxClockInTime, err = time.Parse("15:04", maxClockInTimeStr)
+    if err != nil {
+        // Jika gagal, coba parse dengan format HH:MM:SS
+        maxClockInTime, err = time.Parse("15:04:05", maxClockInTimeStr)
+        if err != nil {
+            return dto.AttendanceResponse{}, fmt.Errorf("format waktu department tidak valid: %v", maxClockInTimeStr)
+        }
+    }
 
-	maxClockInTime, _ := time.Parse("15:04:05", employee.Department.MaxClockInTime)
-	currentTime := time.Date(0, 0, 0, now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
+    // Gunakan timezone yang sama dengan waktu sekarang
+    loc := now.Location()
+    
+    // Buat waktu comparison dengan tanggal yang sama
+    maxClockInToday := time.Date(
+        now.Year(), now.Month(), now.Day(),
+        maxClockInTime.Hour(), maxClockInTime.Minute(), maxClockInTime.Second(), 0, loc,
+    )
 
-	if currentTime.After(maxClockInTime) {
-		isOnTime = false
-		isLate = true
-		message = "Clock In (Late)"
-	}
-	// Check if clock in is on time
-	var attendanceType int8 = 1 // 1 = On Time
-	if isLate {
-		attendanceType = 2
-	}
+    fmt.Printf("Max clock in today: %v\n", maxClockInToday)
+    fmt.Printf("Perbandingan: now (%v) > maxClockInToday (%v) = %v\n", 
+        now, maxClockInToday, now.After(maxClockInToday))
 
-	// Create attendance history
-	history := models.AttendanceHistory{
-		EmployeeID:     request.EmployeeID,
-		AttendanceID:   createdAttendance.AttendanceID,
-		DateAttendance: now,
-		AttendanceType: attendanceType,
-		Description:    message,
-	}
+    // Check jika terlambat
+    isLate := now.After(maxClockInToday)
+    message := "Absen Masuk (Ontime)"
+    attendanceType := 1 // Ontime
 
-	_, err = s.attendanceRepo.CreateHistory(history)
-	if err != nil {
-		return dto.AttendanceResponse{}, err
-	}
+    if isLate {
+        message = "Absen Masuk (Terlambat)"
+        attendanceType = 2 // Late
+        
+        // Hitung keterlambatan dalam menit
+        lateDuration := now.Sub(maxClockInToday)
+        lateMinutes := int(lateDuration.Minutes())
+        message = fmt.Sprintf("Absen Masuk (Terlambat %d menit)", lateMinutes)
+    }
 
-	return dto.AttendanceResponse{
-		ID:           createdAttendance.ID,
-		EmployeeID:   createdAttendance.EmployeeID,
-		AttendanceID: createdAttendance.AttendanceID,
-		ClockIn:      utils.FormatTS(createdAttendance.ClockIn),
-		ClockOut:     utils.FormatTSPtr(createdAttendance.ClockOut),
-		CreatedAt:    utils.FormatTS(createdAttendance.CreatedAt),
-		IsOnTime:     isOnTime,
-		IsLate:       isLate,
-		IsEarly:      false,
-		Message:      message,
-	}, nil
+    attendance := models.Attendance{
+        EmployeeID:   request.EmployeeID,
+        AttendanceID: attendanceID,
+        ClockIn:      now,
+        ClockOut:     nil,
+    }
+
+    createdAttendance, err := s.attendanceRepo.CreateAttendance(attendance)
+    if err != nil {
+        return dto.AttendanceResponse{}, err
+    }
+
+    // Create attendance history
+    history := models.AttendanceHistory{
+        EmployeeID:     request.EmployeeID,
+        AttendanceID:   createdAttendance.AttendanceID,
+        DateAttendance: now,
+        AttendanceType: int8(attendanceType),
+        Description:    message,
+    }
+
+    _, err = s.attendanceRepo.CreateHistory(history)
+    if err != nil {
+        return dto.AttendanceResponse{}, err
+    }
+
+    return dto.AttendanceResponse{
+        ID:           createdAttendance.ID,
+        EmployeeID:   createdAttendance.EmployeeID,
+        AttendanceID: createdAttendance.AttendanceID,
+        ClockIn:      utils.FormatTS(createdAttendance.ClockIn),
+        ClockOut:     utils.FormatTSPtr(createdAttendance.ClockOut),
+        CreatedAt:    utils.FormatTS(createdAttendance.CreatedAt),
+        Message:      message,
+        EmployeeName: employee.Name,
+        Department:   employee.Department.DepartmentName,
+        IsLate:       isLate,
+    }, nil
 }
 
 func (s *attendanceService) ClockOut(request dto.ClockOutRequest) (dto.AttendanceResponse, error) {
-	// Check if employee exists
 	employee, err := s.employeeRepo.FindByEmployeeID(request.EmployeeID)
 	if err != nil {
-		return dto.AttendanceResponse{}, fmt.Errorf("employee not found")
+		return dto.AttendanceResponse{}, fmt.Errorf("Karyawan tidak ditemukan")
 	}
 
-	// Check if already clocked in today
 	now := time.Now()
 	attendance, err := s.attendanceRepo.FindByEmployeeIDAndDate(request.EmployeeID, now)
 	if err != nil || attendance.ID == 0 {
-		return dto.AttendanceResponse{}, fmt.Errorf("you haven't clocked in today")
+		return dto.AttendanceResponse{}, fmt.Errorf("Belum melakukan absen masuk hari ini")
 	}
 
 	// Check if already clocked out
 	if attendance.ClockOut != nil {
-		return dto.AttendanceResponse{}, fmt.Errorf("already clocked out today")
+		return dto.AttendanceResponse{}, fmt.Errorf("Sudah absen keluar hari ini")
 	}
 
 	// Update attendance record
@@ -138,38 +163,46 @@ func (s *attendanceService) ClockOut(request dto.ClockOutRequest) (dto.Attendanc
 		return dto.AttendanceResponse{}, err
 	}
 
-	// Check if clock out is on time
-	isClockInOnTime := true
-	maxClockInTime, _ := time.Parse("15:04:05", employee.Department.MaxClockInTime)
-	clockInTime := time.Date(0, 0, 0, attendance.ClockIn.Hour(), attendance.ClockIn.Minute(), attendance.ClockIn.Second(), 0, time.UTC)
+	// Hitung apakah clock in terlambat (untuk response)
+	// Parse max clock in time dari department
+	maxClockInTimeStr := employee.Department.MaxClockInTime
+	var maxClockInTime time.Time
+	var isLate bool = false
 
-	if clockInTime.After(maxClockInTime) {
-		isClockInOnTime = false
-	}
-	isOnTime := true
-	isEarly := false
-	message := "Clock Out (On Time)"
-
-	maxClockOutTime, _ := time.Parse("15:04:05", employee.Department.MaxClockOutTime)
-	currentTime := time.Date(0, 0, 0, now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
-
-	if currentTime.Before(maxClockOutTime) {
-		isOnTime = false
-		isEarly = true
-		message = "Clock Out (Early)"
+	// Coba parse dengan format HH:MM dulu
+	maxClockInTime, err = time.Parse("15:04", maxClockInTimeStr)
+	if err != nil {
+		// Jika gagal, coba parse dengan format HH:MM:SS
+		maxClockInTime, err = time.Parse("15:04:05", maxClockInTimeStr)
 	}
 
-	var attendanceType int8 = 1 // 1 = On Time
-	if isEarly {
-		attendanceType = 3 // 3 = Early
+	if err == nil {
+		// Gunakan timezone yang sama dengan waktu clock in
+		loc := updatedAttendance.ClockIn.Location()
+		
+		// Buat waktu comparison dengan tanggal yang sama dengan clock in
+		maxClockInToday := time.Date(
+			updatedAttendance.ClockIn.Year(), 
+			updatedAttendance.ClockIn.Month(), 
+			updatedAttendance.ClockIn.Day(),
+			maxClockInTime.Hour(), 
+			maxClockInTime.Minute(), 
+			maxClockInTime.Second(), 0, loc,
+		)
+
+		// Check jika clock in terlambat
+		isLate = updatedAttendance.ClockIn.After(maxClockInToday)
 	}
+
+	message := "Absen Keluar"
+	attendanceType := 3 // Clock Out
 
 	// Create attendance history
 	history := models.AttendanceHistory{
 		EmployeeID:     request.EmployeeID,
 		AttendanceID:   updatedAttendance.AttendanceID,
 		DateAttendance: now,
-		AttendanceType: attendanceType,
+		AttendanceType: int8(attendanceType),
 		Description:    message,
 	}
 
@@ -185,72 +218,36 @@ func (s *attendanceService) ClockOut(request dto.ClockOutRequest) (dto.Attendanc
 		ClockIn:      utils.FormatTS(updatedAttendance.ClockIn),
 		ClockOut:     utils.FormatTSPtr(updatedAttendance.ClockOut),
 		CreatedAt:    utils.FormatTS(updatedAttendance.CreatedAt),
-		IsOnTime:     isClockInOnTime && isOnTime,
-		IsLate:       !isClockInOnTime,
-		IsEarly:      isEarly,
 		Message:      message,
+		EmployeeName: employee.Name,
+		Department:   employee.Department.DepartmentName,
+		IsLate:       isLate, 
 	}, nil
 }
-
 func (s *attendanceService) GetAttendanceLogs(filter dto.AttendanceFilter) ([]dto.AttendanceResponse, int64, error) {
-	attendances, total, err := s.attendanceRepo.FindAllAttendance(filter)
-	if err != nil {
-		return nil, 0, err
-	}
+    attendances, total, err := s.attendanceRepo.FindAllAttendance(filter)
+    if err != nil {
+        return nil, 0, err
+    }
 
-	var responses []dto.AttendanceResponse
-	for _, attendance := range attendances {
-		// Get employee data to check department times
-		employee, err := s.employeeRepo.FindByEmployeeID(attendance.EmployeeID)
-		if err != nil {
-			continue // Skip if employee not found
-		}
+    responses := make([]dto.AttendanceResponse, 0, len(attendances))
 
-		// Check clock in status
-		isClockInOnTime := true
-		maxClockInTime, _ := time.Parse("15:04:05", employee.Department.MaxClockInTime)
-		clockInTime := time.Date(0, 0, 0, attendance.ClockIn.Hour(), attendance.ClockIn.Minute(), attendance.ClockIn.Second(), 0, time.UTC)
+    for _, a := range attendances {
+        emp := a.Employee
+        dept := emp.Department
 
-		if clockInTime.After(maxClockInTime) {
-			isClockInOnTime = false
-		}
+        responses = append(responses, dto.AttendanceResponse{
+            ID:           a.ID,
+            EmployeeID:   a.EmployeeID,
+            EmployeeName: emp.Name,
+            AttendanceID: a.AttendanceID,
+            ClockIn:      utils.FormatTS(a.ClockIn),
+            ClockOut:     utils.FormatTSPtr(a.ClockOut),
+            CreatedAt:    utils.FormatTS(a.CreatedAt),
+            Message:      "Attendance Record",
+            Department:   dept.DepartmentName,
+        })
+    }
 
-		// Check clock out status
-		isClockOutOnTime := true
-		isEarly := false
-		if attendance.ClockOut != nil {
-			maxClockOutTime, _ := time.Parse("15:04:05", employee.Department.MaxClockOutTime)
-			clockOutTime := time.Date(0, 0, 0, attendance.ClockOut.Hour(), attendance.ClockOut.Minute(), attendance.ClockOut.Second(), 0, time.UTC)
-
-			if clockOutTime.Before(maxClockOutTime) {
-				isClockOutOnTime = false
-				isEarly = true
-			}
-		}
-
-		// Determine message
-		message := "On Time"
-		if !isClockInOnTime {
-			message = "Late Arrival"
-		} else if isEarly {
-			message = "Early Departure"
-		} else if !isClockOutOnTime && attendance.ClockOut != nil {
-			message = "On Time Departure"
-		}
-
-		responses = append(responses, dto.AttendanceResponse{
-			ID:           attendance.ID,
-			EmployeeID:   attendance.EmployeeID,
-			AttendanceID: attendance.AttendanceID,
-			ClockIn:      utils.FormatTS(attendance.ClockIn),
-			ClockOut:     utils.FormatTSPtr(attendance.ClockOut),
-			CreatedAt:    utils.FormatTS(attendance.CreatedAt),
-			IsOnTime:     isClockInOnTime && isClockOutOnTime,
-			IsLate:       !isClockInOnTime,
-			IsEarly:      isEarly,
-			Message:      message,
-		})
-	}
-
-	return responses, total, nil
+    return responses, total, nil
 }
